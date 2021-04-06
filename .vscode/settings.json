@@ -1,0 +1,6 @@
+{
+	"deno.enable": true,
+	"deno.unstable": true,
+	"deno.lint": true,
+	"liveServer.settings.root": "dist/out",
+}
