@@ -46,7 +46,6 @@ export class EpicalyxServer {
 	private handleNewClient({ clientParams, close, send }: ClientAddedParams): ClientAddedResult {
 		const callOnClose: (() => void)[] = []
 		const methods: Map<string, (message: MethodReq) => void> = new Map()
-		const paramsValidators: ((data: InnerJson) => void)[] = []
 
 		const { params, query } = (clientParams as unknown) as MatchPathResult
 
@@ -59,6 +58,8 @@ export class EpicalyxServer {
 		}
 
 		const registerMethod: OnClientAddedParams['registerMethod'] = (method, fn) => {
+			const paramsValidators: ((data: InnerJson) => void)[] = []
+
 			methods.set(method, async msg => {
 				try {
 					paramsValidators.forEach(validator => validator(msg.params))
