@@ -27,8 +27,8 @@ export function makeDenoWsServer(): WSServer {
 						const [, body] = ev
 						console.log('ws:Ping', body)
 					} else if (isWebSocketCloseEvent(ev)) {
-						// close
 						onClose()
+						if (!sock.isClosed) await sock.close()
 					}
 				}
 			} catch (err) {
