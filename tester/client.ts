@@ -1,3 +1,6 @@
+// deno-lint-ignore no-explicit-any
+declare var localStorage: any
+
 import { EpicalyxClient } from '../client.ts'
 import { makeDomWsClient } from '../ws/dom.ts'
 import {
@@ -17,7 +20,7 @@ import {
 import { jsonStringify, jsonParse, delay } from 'https://denopkg.com/Vehmloewff/deno-utils/mod.ts'
 
 const epicalyx = new EpicalyxClient(makeDomWsClient())
-const url = storable('ws://localhost:5000')
+const url = storable(localStorage.getItem('url') || 'ws://localhost:5000')
 const docsMeta = storable('')
 
 appRoot().$(
@@ -32,6 +35,7 @@ appRoot().$(
 				error: derive(epicalyx.statusCode, code => code < 0),
 			}).on({
 				input() {
+					localStorage.setItem('url', url.get())
 					epicalyx.setUrl(url.get())
 				},
 			}),
