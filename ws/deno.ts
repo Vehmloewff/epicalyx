@@ -49,7 +49,7 @@ export function makeDenoWsServer(): WSServer {
 						return
 					}
 
-					const params = canAcceptSocket(ctx.request.url.pathname)
+					const params = canAcceptSocket(ctx.request.url.pathname + ctx.request.url.search)
 
 					if (!params) return next()
 

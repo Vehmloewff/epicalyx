@@ -23,4 +23,5 @@ export async function runTests() {
 
 	sh(`deno run -A --watch --unstable tester/server.ts`)
 	sh(`deno bundle --unstable --watch --no-check tester/client.ts out/bundle.js`)
+	sh(`deno run -A https://deno.land/x/denoliver/mod.ts ./out`)
 }
