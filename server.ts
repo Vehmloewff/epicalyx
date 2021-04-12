@@ -4,6 +4,7 @@ import { MethodRes, MethodReq, EpicalyxMessageUp, ConnectionClosing } from './ty
 
 // deno-lint-ignore no-explicit-any
 export type LazyMessageType = any
+// deno-lint-ignore no-explicit-any
 export type ErrorType = any
 
 export interface OnClientAddedParams extends MatchPathResult {
