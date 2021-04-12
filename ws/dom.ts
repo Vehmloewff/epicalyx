@@ -1,5 +1,3 @@
-/// <reference lib="dom" />
-
 import { WSClient } from './types.ts'
 
 export function makeDomWsClient(): WSClient {
