@@ -1,16 +1,28 @@
 import { WSServer, ClientAddedParams, ClientAddedResult } from './ws/types.ts'
 import { matchPath, Json, MatchPathResult, InnerJson, JsonDescriptor, validateJson } from 'https://denopkg.com/Vehmloewff/deno-utils/mod.ts'
-import { MethodRes, MethodReq, EpicalyxMessageUp } from './types.ts'
+import { MethodRes, MethodReq, EpicalyxMessageUp, ConnectionClosing } from './types.ts'
 
 // deno-lint-ignore no-explicit-any
 export type LazyMessageType = any
+export type ErrorType = any
 
 export interface OnClientAddedParams extends MatchPathResult {
 	registerClient(id: string): void
 	onClose(fn: () => void): void
-	registerMethod(method: string, onCalled: (data: LazyMessageType) => Promise<InnerJson> | InnerJson): RegisterMethodResult
+
+	close(params: CloseParams): void
+
+	registerMethod(
+		method: string,
+		onCalled: (data: LazyMessageType, pathParams: MatchPathResult['params']) => Promise<unknown | void> | unknown | void
+	): RegisterMethodResult
 	// registerEmitter(scope: string, onCalled: (data: InnerJson, emit: (message: InnerJson) => void) => Promise<boolean> | boolean): void
 	// registerTransmitter(resourceName: string): string // TODO: FINISH
+}
+
+export interface CloseParams {
+	code: string
+	reason: string
 }
 
 export interface RegisterMethodResult {
@@ -25,11 +37,25 @@ export interface EpicalyxServerParams {
 
 export interface ClientRepInServer {
 	id: string
-	close(): void
+	close(params: CloseParams): void
+}
+
+export interface OnClientAddedErrorParams {
+	error: ErrorType
+	connectionPathParams: MatchPathResult['params']
+	connectionQuery: MatchPathResult['query']
+}
+
+export interface OnMethodErrorParams extends OnClientAddedErrorParams {
+	reqMethod: string
+	usedMethod: string
+	methodParams: LazyMessageType
 }
 
 export class EpicalyxServer {
-	private callOnClientAdded: ((params: OnClientAddedParams) => void)[] = []
+	private callOnClientAdded: ((params: OnClientAddedParams) => Promise<void> | void)[] = []
+	private callOnClientAddedError: ((params: OnClientAddedErrorParams) => void)[] = []
+	private callOnMethodError: ((params: OnMethodErrorParams) => void)[] = []
 
 	clients: ClientRepInServer[] = []
 	server: ReturnType<WSServer>
@@ -43,11 +69,24 @@ export class EpicalyxServer {
 		})
 	}
 
-	private handleNewClient({ clientParams, close, send }: ClientAddedParams): ClientAddedResult {
+	private handleNewClient({ clientParams, close: closeSocket, send }: ClientAddedParams): ClientAddedResult {
 		const callOnClose: (() => void)[] = []
-		const methods: Map<string, (message: MethodReq) => void> = new Map()
+		const methods: Map<string, (message: MethodReq, pathParams: MatchPathResult['params']) => void> = new Map()
 
 		const { params, query } = (clientParams as unknown) as MatchPathResult
+
+		const close = ({ code, reason }: CloseParams) => {
+			const closeMessage: ConnectionClosing = {
+				epicalyx: '1.0',
+				type: 'connection-closing',
+				code,
+				reason,
+			}
+
+			send(JSON.stringify(closeMessage))
+
+			closeSocket()
+		}
 
 		const registerClient = (id: string) => {
 			this.clients.push({ id, close })
@@ -60,16 +99,16 @@ export class EpicalyxServer {
 		const registerMethod: OnClientAddedParams['registerMethod'] = (method, fn) => {
 			const paramsValidators: ((data: InnerJson) => void)[] = []
 
-			methods.set(method, async msg => {
+			methods.set(method, async (msg, pathParams) => {
 				try {
 					paramsValidators.forEach(validator => validator(msg.params))
 
-					const res = await fn(msg.params)
+					const res = await fn(msg.params, pathParams)
 					const responseMessage: MethodRes = {
 						epicalyx: '1.0',
 						id: msg.id,
 						type: 'method-res',
-						result: res,
+						result: (res as InnerJson) || null,
 						error: null,
 					}
 
@@ -89,15 +128,15 @@ export class EpicalyxServer {
 					}
 
 					if (code === 'INTERNAL_ERROR')
-						console.error(
-							`Method '${method}' threw an unrecognizable error.  Request params:`,
-							msg.params,
-							'WS connection params:',
-							params,
-							'WS connection query:',
-							query,
-							'Error:',
-							e
+						this.callOnMethodError.forEach(fn =>
+							fn({
+								error: e,
+								connectionQuery: query,
+								connectionPathParams: params,
+								reqMethod: msg.method,
+								usedMethod: method,
+								methodParams: msg.params,
+							})
 						)
 
 					send(JSON.stringify(responseMessage))
@@ -118,15 +157,32 @@ export class EpicalyxServer {
 			}
 		}
 
-		this.callOnClientAdded.forEach(fn =>
-			fn({
-				params,
-				query,
-				registerClient,
-				onClose,
-				registerMethod,
-			})
-		)
+		this.callOnClientAdded.forEach(async fn => {
+			try {
+				await fn({
+					params,
+					query,
+					close,
+					registerClient,
+					onClose,
+					registerMethod,
+				})
+			} catch (e) {
+				const code = e.code && typeof e.code === 'string' ? e.code : 'INTERNAL_ERROR'
+				const reason = code === 'INTERNAL_ERROR' ? 'Internal server error' : e.message
+
+				close({ code, reason })
+
+				if (code === 'INTERNAL_ERROR')
+					this.callOnClientAddedError.forEach(fn =>
+						fn({
+							connectionPathParams: params,
+							connectionQuery: query,
+							error: e,
+						})
+					)
+			}
+		})
 
 		function onMessage(message: string) {
 			const msg = JSON.parse(message) as EpicalyxMessageUp
@@ -136,6 +192,19 @@ export class EpicalyxServer {
 				const func = methods.get(msg.method)
 
 				if (!func) {
+					let didFindMatch = false
+
+					for (const [methodPattern, func] of methods.entries()) {
+						const params = matchPath(methodPattern, msg.method)
+
+						if (!params) continue
+
+						func(msg, params.params)
+						didFindMatch = true
+					}
+
+					if (didFindMatch) return
+
 					const responseMessage: MethodRes = {
 						epicalyx: '1.0',
 						id: msg.id,
@@ -150,7 +219,7 @@ export class EpicalyxServer {
 					return send(JSON.stringify(responseMessage))
 				}
 
-				func(msg)
+				func(msg, {})
 			}
 		}
 
@@ -164,5 +233,13 @@ export class EpicalyxServer {
 
 	onClientAdded(fn: (params: OnClientAddedParams) => Promise<void> | void) {
 		this.callOnClientAdded.push(fn)
+	}
+
+	onClientAddedError(fn: (errorMeta: OnClientAddedErrorParams) => void) {
+		this.callOnClientAddedError.push(fn)
+	}
+
+	onMethodError(fn: (errorMeta: OnMethodErrorParams) => void) {
+		this.callOnMethodError.push(fn)
 	}
 }

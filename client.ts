@@ -54,6 +54,10 @@ export class EpicalyxClient {
 		}
 	}
 
+	getCurrentUrl() {
+		return this.currentUrl
+	}
+
 	/**
 	 * Checks the support the server has for epicalyx.
 	 * Changes the 'statusCode' storable to match the current status.
@@ -155,8 +159,11 @@ export class EpicalyxClient {
 		this.statusCode.set(0)
 	}
 
-	callMethod(method: string, params: InnerJson) {
-		return new Promise<InnerJson>((resolve, reject) => {
+	/**
+	 * Calls an epicalyx method registered on the server
+	 */
+	callMethod(method: string, params: unknown) {
+		return new Promise<unknown>((resolve, reject) => {
 			const id = v4.generate()
 
 			this.ongoingMethodCalls.set(id, msg => {
@@ -178,7 +185,7 @@ export class EpicalyxClient {
 					type: 'method-req',
 					id,
 					method,
-					params,
+					params: params as InnerJson,
 				}
 
 				this.wsClientResult.sendMessage(JSON.stringify(requestMessage))
