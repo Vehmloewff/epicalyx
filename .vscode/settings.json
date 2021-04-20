@@ -3,4 +3,8 @@
 	"deno.unstable": true,
 	"deno.lint": true,
 	"liveServer.settings.root": "dist/out",
+	"deno.suggest.autoImports": true,
+	"deno.suggest.imports.hosts": {
+		
+	}
 }
